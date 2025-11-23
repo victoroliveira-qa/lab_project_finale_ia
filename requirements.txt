@@ -1,0 +1,38 @@
+# --- Framework LangChain & IA ---
+langchain>=0.1.0
+langchain-core
+langchain-community
+langchain-openai
+langchain-chroma
+langchain-text-splitters
+langchain-ollama
+langchain.storage
+langchain.retrievers
+
+# --- Banco Vetorial ---
+chromadb>=0.4.0
+
+# --- Processamento de PDF & Imagem (Etapa 1) ---
+# Unstructured: Para parsing geral e inteligente
+unstructured[all-docs]
+# PdfPlumber: Para extração de texto bruto
+pdfplumber
+# Camelot: Específico para tabelas com linhas (Lattice)
+camelot-py[cv]
+# Dependências auxiliares de PDF
+pdf2image
+pdfminer.six
+pillow
+pypdf
+
+# --- Manipulação de Dados ---
+pandas
+numpy
+
+# --- Utilitários ---
+python-dotenv  # Para ler o .env
+pyyaml         # Para ler os prompts em .yaml
+tiktoken       # Necessário para contar tokens da OpenAI
+
+# --- Embeddings Locais (Opcional: Para o HuggingFace) ---
+sentence-transformers
