@@ -8,79 +8,20 @@
 
 ## 📋 Sobre o Projeto
 
-[cite_start]O **ECLADATTA** é uma arquitetura de *Retrieval-Augmented Generation* (RAG) desenhada para processar documentos econômicos complexos, como o **Relatório de Estabilidade Financeira (REF)** do Banco Central do Brasil[cite: 1, 6].
-
-O campo econômico apresenta documentos que combinam narrativas textuais e dados tabulares. [cite_start]Ferramentas tradicionais frequentemente falham em interpretar essas tabelas, resultando em "alucinações" numéricas[cite: 7].
-
-Este projeto propõe uma abordagem híbrida que:
-1.  [cite_start]**Separa Modalidades:** Processa texto e tabela independentemente para preservar a integridade[cite: 19].
-2.  **RAG Semântico-Estrutural:** Utiliza resumos gerados por IA para buscar tabelas, mas entrega os dados brutos (HTML/Markdown) para o modelo responder.
-3.  [cite_start]**Validação Automática:** Implementa verificação de alucinações numéricas em tempo real.
-
----
-
-## 📂 Estrutura de Pastas
-
-[cite_start]A organização do código reflete rigorosamente as três etapas da metodologia proposta na pesquisa:
-
-```plaintext
-ECLADATTA_Mestrado/
-│
-├── data/                          # Armazenamento de dados (Corpus do projeto)
-│   ├── raw/                       # [Input] PDFs originais (ex: REF do BCB) 
-│   ├── processed/                 # [Etapa 1] Dados limpos e separados (JSON)
-│   │   ├── texts/                 # Fragmentos de texto narrativo
-│   │   ├── tables/                # Tabelas estruturadas (HTML/Markdown)
-│   │   └── summaries/             # Resumos semânticos das tabelas (Gerado por LLM)
-│   ├── vector_db/                 # [Etapa 2] Banco Vetorial Persistente (ChromaDB)
-│   └── gold_standard/             # [Validação] Dados anotados manualmente para métricas [cite: 37]
-│
-├── src/                           # Código Fonte (Pipeline)
-│   ├── ingestion/                 # [Etapa 1] Módulo de Análise e Preparação [cite: 26]
-│   │   ├── pdf_loader.py          # Orquestrador de leitura de PDF
-│   │   ├── table_extractor.py     # Extração estrutural (Camelot/Unstructured)
-│   │   ├── table_summarizer.py    # Geração de resumos semânticos (Metadata)
-│   │   └── text_cleaner.py        # Limpeza de cabeçalhos e ruídos
-│   │
-│   ├── models/                    # [Etapa 2] Processamento e Modelagem [cite: 30]
-│   │   ├── embeddings.py          # Factory de Vetores (Suporta Ollama/OpenAI) [cite: 31]
-│   │   ├── llm_factory.py         # Inicialização do LLM (Llama 3 Local)
-│   │   └── rag_engine.py          # Motor RAG Híbrido (Multi-Vector Retriever)
-│   │
-│   ├── prompts/                   # Engenharia de Prompt (Prompt Learning) [cite: 32]
-│   │   ├── templates.py           # Carregador de templates Python
-│   │   └── system_prompts.yaml    # Definição de personas e instruções JSON
-│   │
-│   └── evaluation/                # [Etapa 3] Validação e Resultados [cite: 34]
-│       ├── hallucination_check.py # Auditoria de consistência numérica (LLM-as-a-Judge)
-│       ├── metrics.py             # Cálculo de Precision/Recall
-│       └── saver.py               # Persistência de logs e CSV final
-│
-├── outputs/                       # Resultados Finais
-│   ├── logs/                      # Histórico de execução e erros
-│   └── relations_extracted.csv    # Corpus final de relações extraídas
-│
-├── .env                           # Configurações de ambiente
-├── main.py                        # Orquestrador Principal (CLI)
-├── requirements.txt               # Dependências do Python
-└── setup_project.py               # Script de automação de ambiente
-
-## 📋 Sobre o Projeto
-
-[cite_start]O **ECLADATTA** é uma arquitetura de *Retrieval-Augmented Generation* (RAG) desenhada para processar documentos econômicos complexos, como o **Relatório de Estabilidade Financeira (REF)** do Banco Central do Brasil.
-
-O campo econômico apresenta documentos que combinam narrativas textuais e dados tabulares. [cite_start]Ferramentas tradicionais frequentemente falham em interpretar essas tabelas, resultando em "alucinações" numéricas[cite: 6, 7].
+Este projeto usará uma arquitetura de *Retrieval-Augmented Generation* (RAG) desenhada para processar documentos econômicos complexos, como o **Relatório de Estabilidade Financeira (REF)** do Banco Central do Brasil.
+O campo econômico apresenta documentos que combinam narrativas textuais e dados tabulares.
+Ferramentas tradicionais frequentemente falham em interpretar essas tabelas, resultando em "alucinações" numéricas.
 
 Este projeto propõe uma abordagem híbrida que:
-1.  [cite_start]**Separa Modalidades:** Processa texto e tabela independentemente para preservar a integridade[cite: 19].
+1.  **Separa Modalidades:** Processa texto e tabela independentemente para preservar a integridade.
 2.  **RAG Semântico-Estrutural:** Utiliza resumos gerados por IA para buscar tabelas, mas entrega os dados brutos (HTML/Markdown) para o modelo responder.
-3.  [cite_start]**Validação Automática:** Implementa verificação de alucinações numéricas em tempo real[cite: 36].
+3.  **Validação Automática:** Implementa verificação de alucinações numéricas em tempo real.
 
 ---
 
 ## 🏗️ Arquitetura do Pipeline
 
-[cite_start]O sistema segue a metodologia dividida em três etapas[cite: 25]:
+O sistema segue a metodologia dividida em três etapas:
 
 1.  **Ingestão e Análise:**
     * Separação via `Unstructured` e `Camelot`.
@@ -91,7 +32,7 @@ Este projeto propõe uma abordagem híbrida que:
     * Embeddings: **Nomic-Embed-Text**.
 3.  **Validação e Extração:**
     * Chat interativo com verificação de consistência (`Hallucination Checker`).
-    * [cite_start]Extração em lote (Batch) para construção de corpus (`relations_extracted.csv`)[cite: 22].
+    * Extração em lote (Batch) para construção de corpus (`relations_extracted.csv`).
 
 ---
 
@@ -142,9 +83,55 @@ Este projeto roda 100% localmente para garantir privacidade dos dados.
 
 ---
 
-## 🖥️ Como Usar
-
+# 🖥️ Como Usar
 Execute o orquestrador principal:
-
 ```bash
-python main.py
+    python main.py
+```
+
+## 📂 Estrutura de Pastas
+
+A organização do código reflete rigorosamente as três etapas da metodologia proposta na pesquisa:
+
+```plaintext
+
+LAB_PROJECT_FINALE_IA/
+│
+├── data/                          # Armazenamento de dados (Corpus do projeto)
+│   ├── raw/                       # [Input] PDFs originais (ex: REF do BCB) 
+│   ├── processed/                 # [Etapa 1] Dados limpos e separados (JSON)
+│   │   ├── texts/                 # Fragmentos de texto narrativo
+│   │   ├── tables/                # Tabelas estruturadas (HTML/Markdown)
+│   │   └── summaries/             # Resumos semânticos das tabelas (Gerado por LLM)
+│   ├── vector_db/                 # [Etapa 2] Banco Vetorial Persistente (ChromaDB)
+│   └── gold_standard/             # [Validação] Dados anotados manualmente para métricas
+│
+├── src/                           # Código Fonte (Pipeline)
+│   ├── ingestion/                 # [Etapa 1] Módulo de Análise e Preparação
+│   │   ├── pdf_loader.py          # Orquestrador de leitura de PDF
+│   │   ├── table_extractor.py     # Extração estrutural (Camelot/Unstructured)
+│   │   ├── table_summarizer.py    # Geração de resumos semânticos (Metadata)
+│   │   └── text_cleaner.py        # Limpeza de cabeçalhos e ruídos
+│   │
+│   ├── models/                    # [Etapa 2] Processamento e Modelagem
+│   │   ├── embeddings.py          # Factory de Vetores (Suporta Ollama/OpenAI)
+│   │   ├── llm_factory.py         # Inicialização do LLM (Llama 3 Local)
+│   │   └── rag_engine.py          # Motor RAG Híbrido (Multi-Vector Retriever)
+│   │
+│   ├── prompts/                   # Engenharia de Prompt (Prompt Learning)
+│   │   ├── templates.py           # Carregador de templates Python
+│   │   └── system_prompts.yaml    # Definição de personas e instruções JSON
+│   │
+│   └── evaluation/                # [Etapa 3] Validação e Resultados
+│       ├── hallucination_check.py # Auditoria de consistência numérica (LLM-as-a-Judge)
+│       ├── metrics.py             # Cálculo de Precision/Recall
+│       └── saver.py               # Persistência de logs e CSV final
+│
+├── outputs/                       # Resultados Finais
+│   ├── logs/                      # Histórico de execução e erros
+│   └── relations_extracted.csv    # Corpus final de relações extraídas
+│
+├── .env                           # Configurações de ambiente
+├── main.py                        # Orquestrador Principal (CLI)
+├── requirements.txt               # Dependências do Python
+└── setup_project.py               # Script de automação de ambiente
