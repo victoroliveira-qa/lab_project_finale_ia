@@ -1,60 +1,63 @@
 import camelot
+import json
 import pandas as pd
 from pathlib import Path
-from typing import List, Dict, Union
 
 
-class TableExtractor:
+def extrair_tabelas_camelot(caminho_pdf, diretorio_saida):
     """
-    Especialista em extrair tabelas de PDFs mantendo a estrutura.
-    Utiliza Camelot conforme metodologia.
+    Extrai tabelas usando Camelot e salva cada uma como JSON.
+    Tenta método 'lattice' (com bordas) e 'stream' (sem bordas).
     """
+    caminho_pdf = str(caminho_pdf)
+    diretorio_saida = Path(diretorio_saida)
 
-    @staticmethod
-    def extrair_com_camelot(caminho_pdf: Union[str, Path], paginas: str = "all") -> List[Dict]:
-        """
-        Usa a biblioteca Camelot para extrair tabelas (Requer Ghostscript instalado).
-        Modo 'lattice' é ideal para tabelas com bordas definidas (comuns em balanços).
-        """
-        print(f"   Extratindo tabelas de {caminho_pdf} com Camelot...")
-        dados_extraidos = []
+    todas_tabelas = []
 
-        try:
-            # Tenta extrair usando o modo lattice (linhas)
-            tabelas = camelot.read_pdf(str(caminho_pdf), pages=paginas, flavor='lattice')
+    try:
+        # 1. Tentativa Lattice (Tabelas com linhas de grade)
+        # print(f"      ...Tentando método Lattice em {Path(caminho_pdf).name}")
+        tabelas_lattice = camelot.read_pdf(caminho_pdf, pages='all', flavor='lattice')
+        for t in tabelas_lattice:
+            todas_tabelas.append(t)
 
-            # Se não achar nada, tenta o modo stream (espaçamento em branco)
-            if len(tabelas) == 0:
-                tabelas = camelot.read_pdf(str(caminho_pdf), pages=paginas, flavor='stream')
+        # 2. Tentativa Stream (Se Lattice falhar ou para tabelas sem bordas)
+        if len(todas_tabelas) == 0:
+            # print("      ...Lattice vazio. Tentando método Stream")
+            tabelas_stream = camelot.read_pdf(caminho_pdf, pages='all', flavor='stream', edge_tol=500)
+            for t in tabelas_stream:
+                todas_tabelas.append(t)
 
-            for i, tabela in enumerate(tabelas):
-                df = tabela.df
+        if not todas_tabelas:
+            return
 
-                # Limpeza básica do DataFrame
-                df = df.replace(r'\n', ' ', regex=True)  # Remove quebras dentro da célula
+        # 3. Processar e Salvar
+        for i, tabela in enumerate(todas_tabelas):
+            df = tabela.df
 
-                dados_extraidos.append({
-                    "id_tabela": f"tab_{tabela.page}_{i}",
-                    "pagina": tabela.page,
-                    "conteudo_html": df.to_html(index=False, header=False),  # HTML é melhor para LLMs lerem
-                    "conteudo_csv": df.to_csv(index=False, header=False),
-                    "metodo": "camelot"
-                })
+            # Limpeza básica: remove linhas totalmente vazias
+            df = df.dropna(how='all').fillna("")
 
-        except Exception as e:
-            print(f"   Erro no Camelot (pode ser falta do Ghostscript): {e}")
-            print("   Tentando fallback...")
-            return []
+            # Ignora tabelas minúsculas (ruído)
+            if df.shape[0] < 2:
+                continue
 
-        return dados_extraidos
+            # Converte para HTML (preserva estrutura para o LLM)
+            html_content = df.to_html(index=False, border=1)
 
-    @staticmethod
-    def salvar_tabela(dados_tabela: Dict, diretorio_saida: Path):
-        """Salva a tabela processada em arquivo JSON."""
-        import json
+            # Estrutura do JSON
+            dados_tabela = {
+                "content": html_content,
+                "type": "table",
+                "source": Path(caminho_pdf).name,
+                "page_number": tabela.page,
+                "method": tabela.flavor
+            }
 
-        nome_arquivo = f"table_{dados_tabela['id_tabela']}.json"
-        caminho_final = diretorio_saida / nome_arquivo
+            # Salva o arquivo
+            nome_arquivo = diretorio_saida / f"table_pg{tabela.page}_{i + 1}.json"
+            with open(nome_arquivo, "w", encoding="utf-8") as f:
+                json.dump(dados_tabela, f, ensure_ascii=False, indent=4)
 
-        with open(caminho_final, 'w', encoding='utf-8') as f:
-            json.dump(dados_tabela, f, ensure_ascii=False, indent=4)
+    except Exception as e:
+        print(f"      ❌ Erro ao extrair tabelas: {e}")

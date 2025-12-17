@@ -4,9 +4,8 @@ import json
 from langchain_core.runnables import RunnablePassthrough
 from langchain_core.output_parsers import StrOutputParser
 
-# Imports do Projeto
-from src.config import RAW_DIR, VECTOR_DB_DIR
-from src.ingestion.pdf_loader import processar_documento
+from src.config import VECTOR_DB_DIR, PROCESSED_DIR
+from src.ingestion.pdf_loader import processar_todos_pdfs
 from src.ingestion.table_summarizer import gerar_resumos_tabelas
 from src.models.rag_engine import RAGEngine
 from src.models.llm_factory import LLMFactory
@@ -14,135 +13,135 @@ from src.prompts.templates import PROMPT_RAG_FINAL, PROMPT_EXTRACAO
 from src.evaluation.hallucination_check import VerificadorAlucinacao
 from src.evaluation.saver import configurar_logger, salvar_relacoes_csv
 
-# Inicializa o Logger Global
 logger = configurar_logger()
 
 
-def verificar_arquivo_entrada():
-    """Verifica se existe PDF na pasta raw."""
-    arquivos = list(RAW_DIR.glob("*.pdf"))
-    if not arquivos:
-        logger.error(f"Nenhum PDF encontrado em {RAW_DIR}")
-        sys.exit(1)
-    return arquivos[0].name
+# --- FUNÇÃO NOVA: Formata o contexto para exibir a fonte no Chat ---
+def formatar_docs_com_fonte(docs):
+    contexto_formatado = []
+    for d in docs:
+        fonte = d.metadata.get('source', 'Desconhecido')
+        pag = d.metadata.get('page', '?')
+        tipo = d.metadata.get('type', 'texto')
+
+        # Cria um cabeçalho visível para o LLM e para o usuário
+        header = f"\n--- [FONTE: {fonte} | Pág: {pag} | Tipo: {tipo}] ---\n"
+        contexto_formatado.append(header + d.page_content)
+
+    return "\n".join(contexto_formatado)
 
 
-def pipeline_ingestao(nome_arquivo):
-    logger.info(f"🚀 INICIANDO INGESTÃO: {nome_arquivo}")
+def pipeline_extracao_automatica():
+    """Varre todos os dados processados e gera o CSV automaticamente."""
+    print("\n🏭 INICIANDO EXTRAÇÃO AUTOMÁTICA DE RELAÇÕES (CSV)...")
+    logger.info("Iniciando extração batch automática")
 
-    # 1. Extração
-    logger.info("--- [Etapa 1.1] Extração Texto/Tabela ---")
-    processar_documento(nome_arquivo)
+    llm = LLMFactory.create_chat_model(temperature=0)
+    chain = PROMPT_EXTRACAO | llm | StrOutputParser()
 
-    # 2. Resumo
-    logger.info("--- [Etapa 1.2] Geração de Resumos ---")
+    # Busca recursiva em todas as pastas
+    arquivos = list(PROCESSED_DIR.rglob("texts/*.json"))
+    total = len(arquivos)
+
+    count_saved = 0
+    for i, arq in enumerate(arquivos):
+        try:
+            with open(arq, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+
+            # Só processa se tiver texto substancial
+            if len(data.get('content', '')) < 100: continue
+
+            print(f"   Processando {i}/{total}: {data.get('source')} (pág {data.get('page_number')})...", end="\r")
+
+            res = chain.invoke({"texto_input": data['content'], "tabela_input": "Batch Auto"})
+            salvar_relacoes_csv(res, fonte=f"AUTO_{data.get('source')}")
+            count_saved += 1
+        except Exception as e:
+            logger.error(f"Erro no batch {arq}: {e}")
+
+    print(f"\n✅ Extração concluída! {count_saved} fragmentos processados e salvos no CSV.")
+
+
+def pipeline_ingestao_completa():
+    # 1. Processa TODOS os PDFs
+    pdfs_processados = processar_todos_pdfs()
+
+    if not pdfs_processados:
+        print("Nenhum PDF novo processado.")
+        return
+
+    # 2. Gera Resumos
     gerar_resumos_tabelas()
 
-    # 3. Indexação
-    logger.info("--- [Etapa 2.1] Indexação Vetorial ---")
-    motor = RAGEngine()
-    motor.indexar_dados()
+    # 3. Indexa Tudo
+    engine = RAGEngine()
+    engine.indexar_dados()
 
-    logger.info("✅ Ingestão concluída!")
+    # 4. PASSO NOVO: Gera o CSV automaticamente ao final
+    pipeline_extracao_automatica()
 
 
 def pipeline_chat():
-    logger.info("🤖 SISTEMA ECLADATTA - INICIADO")
-
-    # Carrega Motor
-    motor = RAGEngine()
-    retriever = motor.get_retriever()
-    llm = LLMFactory.create_chat_model(temperature=0)
+    print("\n🤖 CHAT INICIADO (Digite 'sair' para encerrar)")
+    engine = RAGEngine()
+    retriever = engine.get_retriever()
+    llm = LLMFactory.create_chat_model()
     verificador = VerificadorAlucinacao()
 
-    # Cadeia de Chat (Conversa)
+    # Chain personalizada com formatação de fonte
     rag_chain = (
-            {"context": retriever, "question": RunnablePassthrough()}
+            {
+                "context": retriever | formatar_docs_com_fonte,
+                "question": RunnablePassthrough()
+            }
             | PROMPT_RAG_FINAL
             | llm
             | StrOutputParser()
     )
 
-    # Cadeia de Extração (Para popular o CSV)
-    # Usa o prompt específico 'extracao_relacoes' do seu YAML
-    extraction_chain = (
-            PROMPT_EXTRACAO
-            | llm
-            | StrOutputParser()
-    )
-
-    print("\n--- ECLADATTA PRONTO ---")
-    print("Digite 'sair' para encerrar.")
-    print("Digite 'extrair' para forçar a extração de relações do último contexto.")
-
-    ultimo_contexto = ""
-
     while True:
-        pergunta = input("\n👤 Você: ")
-        if pergunta.lower() in ['sair', 'exit']:
-            break
+        pergunta = input("\n👤 Pergunta: ")
+        if pergunta.lower() in ['sair', 'exit']: break
 
-        # Opção manual para salvar no CSV (ou poderia ser automático)
-        if pergunta.lower() == 'extrair':
-            if not ultimo_contexto:
-                print("⚠️ Faça uma pergunta primeiro para carregar o contexto.")
-                continue
-
-            print("⏳ Extraindo relações estruturadas para CSV...")
-            try:
-                # Chama o LLM pedindo JSON
-                json_resultado = extraction_chain.invoke({
-                    "texto_input": ultimo_contexto,
-                    "tabela_input": "Verificar contexto acima"
-                })
-                # Salva no arquivo
-                salvar_relacoes_csv(json_resultado, fonte="interacao_usuario")
-            except Exception as e:
-                logger.error(f"Erro na extração: {e}")
-            continue
-
-        # Fluxo Normal de Chat
-        logger.info(f"Pergunta recebida: {pergunta}")
-        print("⏳ Processando...", end="\r")
-
-        # 1. Recupera Contexto
+        # 1. Recupera documentos para mostrar as fontes ao usuário
         docs = retriever.invoke(pergunta)
-        contexto_str = "\n".join([d.page_content for d in docs])
-        ultimo_contexto = contexto_str  # Guarda para uso na extração
 
-        # 2. Gera Resposta
+        print("\n🔍 Consultando as seguintes fontes:")
+        fontes_usadas = set()
+        for d in docs:
+            nome = d.metadata.get('source', 'Desconhecido')
+            pag = d.metadata.get('page', '?')
+            print(f"   📄 {nome} (Pág. {pag})")
+            fontes_usadas.add(nome)
+
+        print("⏳ Gerando resposta...", end="\r")
         resposta = rag_chain.invoke(pergunta)
 
-        # 3. Valida Alucinação
-        analise = verificador.verificar_consistencia_numerica(resposta, contexto_str)
+        print(f"\n🤖 ECLADATTA:\n{resposta}")
 
-        print(f"\n🤖 ECLADATTA: {resposta}")
-
-        if analise.get("tem_alucinacao"):
-            logger.warning(f"Alucinação detectada: {analise}")
-            print(f"\n⚠️ ALERTA: Possível inconsistência numérica.")
-
-        # Opcional: Extração Automática (Se quiser popular o CSV sempre)
-        # salvar_relacoes_csv(extraction_chain.invoke({...}), fonte="auto")
+        # Validação Rápida
+        if verificador.verificar_consistencia_numerica(resposta, str(docs)).get("tem_alucinacao"):
+            print("⚠️ ALERTA: Verifique os números na fonte original.")
 
 
 def main():
-    if not os.path.exists(VECTOR_DB_DIR):
-        print("Banco de dados não encontrado. Iniciando ingestão...")
-        arquivo = verificar_arquivo_entrada()
-        pipeline_ingestao(arquivo)
+    print("--- SISTEMA MULTI-PDF ECLADATTA ---")
+    print("1. Processar TODOS os PDFs (Gera CSV ao final)")
+    print("2. Apenas Chat (Usa dados já processados)")
 
-    # Menu simples
-    print("1. Re-processar documentos")
-    print("2. Iniciar Chat")
-    escolha = input("Opção: ").strip()
+    opt = input("Opção: ")
 
-    if escolha == "1":
-        arquivo = verificar_arquivo_entrada()
-        pipeline_ingestao(arquivo)
-        pipeline_chat()
-    else:
-        pipeline_chat()
+    if opt == "1":
+        pipeline_ingestao_completa()
+        # Opcional: Entrar no chat direto após processar
+        if input("\nIr para o chat? (s/n): ").lower() == 's':
+            pipeline_chat()
+    elif opt == "2":
+        if not os.path.exists(VECTOR_DB_DIR):
+            print("⚠️ Erro: Nenhum dado processado encontrado. Rode a opção 1 primeiro.")
+        else:
+            pipeline_chat()
 
 
 if __name__ == "__main__":

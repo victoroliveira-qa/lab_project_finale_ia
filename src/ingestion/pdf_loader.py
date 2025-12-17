@@ -1,65 +1,72 @@
-import pdfplumber
 import json
-import uuid
+import shutil
 from pathlib import Path
-from src.config import RAW_DIR, TEXTS_DIR, TABLES_DIR
-from src.ingestion.text_cleaner import TextCleaner
-from src.ingestion.table_extractor import TableExtractor
+from src.config import RAW_DIR, PROCESSED_DIR
+from src.ingestion.text_cleaner import limpar_texto
+from src.ingestion.table_extractor import extrair_tabelas_camelot
+from langchain_community.document_loaders import PDFPlumberLoader
 
 
-def processar_documento(nome_arquivo: str):
+def salvar_json(dados, caminho_arquivo):
+    """Salva dados em JSON garantindo a criação das pastas."""
+    caminho_arquivo.parent.mkdir(parents=True, exist_ok=True)
+    with open(caminho_arquivo, "w", encoding="utf-8") as f:
+        json.dump(dados, f, ensure_ascii=False, indent=4)
+
+
+def processar_todos_pdfs():
     """
-    Função principal da Etapa 1: Ingestão.
-    Lê o PDF, extrai tabelas (Camelot) e textos (pdfplumber), limpa e salva.
+    Lê TODOS os PDFs da pasta data/raw e processa um por um.
+    Cria pastas separadas para cada PDF em data/processed/.
     """
-    caminho_pdf = RAW_DIR / nome_arquivo
-    if not caminho_pdf.exists():
-        raise FileNotFoundError(f"Arquivo {nome_arquivo} não encontrado em {RAW_DIR}")
+    pdfs = list(RAW_DIR.glob("*.pdf"))
 
-    print(f"--- Iniciando Processamento: {nome_arquivo} ---")
+    if not pdfs:
+        print(f"⚠️ Nenhum PDF encontrado em {RAW_DIR}")
+        return []
 
-    # 1. Extração de Tabelas (Prioridade alta para garantir integridade estrutural )
-    extrator_tabelas = TableExtractor()
-    lista_tabelas = extrator_tabelas.extrair_com_camelot(caminho_pdf)
+    print(f"📂 Encontrados {len(pdfs)} arquivos para processar.")
 
-    # Salva tabelas
-    for tab in lista_tabelas:
-        tab['origem'] = nome_arquivo
-        extrator_tabelas.salvar_tabela(tab, TABLES_DIR)
+    pdfs_processados = []
 
-    print(f"   [OK] {len(lista_tabelas)} tabelas extraídas e salvas.")
+    for pdf_path in pdfs:
+        nome_pdf = pdf_path.stem  # Ex: 'relatorio_2024'
+        print(f"\n--- 🚀 Processando: {pdf_path.name} ---")
 
-    # 2. Extração de Texto (Excluindo a área das tabelas se possível, ou bruto)
-    print(f"   Extraindo textos com pdfplumber...")
+        # 1. Cria estrutura de pastas específica para ESTE pdf
+        # Ex: data/processed/relatorio_2024/texts
+        pdf_dir = PROCESSED_DIR / nome_pdf
+        texts_dir = pdf_dir / "texts"
+        tables_dir = pdf_dir / "tables"
 
-    with pdfplumber.open(caminho_pdf) as pdf:
-        for i, pagina in enumerate(pdf.pages):
-            # Extrai texto cru
-            texto_bruto = pagina.extract_text()
+        # Limpa processamento anterior desse PDF específico se existir
+        if pdf_dir.exists():
+            shutil.rmtree(pdf_dir)
 
-            if texto_bruto:
-                # Aplica a limpeza definida em text_cleaner.py
-                texto_limpo = TextCleaner.processar(texto_bruto)
+        texts_dir.mkdir(parents=True, exist_ok=True)
+        tables_dir.mkdir(parents=True, exist_ok=True)
 
-                # Prepara objeto JSON
-                dados_texto = {
-                    "id": str(uuid.uuid4()),
-                    "pagina": i + 1,
-                    "origem": nome_arquivo,
-                    "conteudo": texto_limpo,
-                    "tipo": "texto_narrativo"
-                }
+        # 2. Extração de Texto (PDFPlumber)
+        loader = PDFPlumberLoader(str(pdf_path))
+        docs = loader.load()
 
-                # Salva texto
-                nome_json = f"text_pg{i + 1}_{dados_texto['id'][:8]}.json"
-                with open(TEXTS_DIR / nome_json, 'w', encoding='utf-8') as f:
-                    json.dump(dados_texto, f, ensure_ascii=False, indent=4)
+        print(f"   📄 Extraindo textos de {len(docs)} páginas...")
+        for i, doc in enumerate(docs):
+            conteudo_limpo = limpar_texto(doc.page_content)
+            if not conteudo_limpo: continue
 
-    print(f"   [OK] Textos processados e salvos em {TEXTS_DIR}")
-    print("--- Fim da Etapa 1 ---")
+            meta = {
+                "content": conteudo_limpo,
+                "source": pdf_path.name,  # Guarda o nome do arquivo original
+                "page_number": doc.metadata.get("page", 0) + 1,
+                "type": "text"
+            }
+            salvar_json(meta, texts_dir / f"page_{i + 1}.json")
 
+        # 3. Extração de Tabelas (Camelot)
+        print(f"   📊 Extraindo tabelas...")
+        extrair_tabelas_camelot(pdf_path, tables_dir)
 
-if __name__ == "__main__":
-    # Exemplo de uso para teste rápido
-    # processar_documento("relatorio_exemplo.pdf")
-    pass
+        pdfs_processados.append(nome_pdf)
+
+    return pdfs_processados

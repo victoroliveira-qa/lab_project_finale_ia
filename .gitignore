@@ -1,8 +1,6 @@
 .env
 .idea/
-data/processed/summaries
-data/processed/tables
-data/processed/texts
+data/processed
 data/vector_db
 src/__init__.py
 src/__pycache__

@@ -1,50 +1,31 @@
 import re
 
 
-class TextCleaner:
+def limpar_texto(texto: str) -> str:
     """
-    Responsável por higienizar o texto extraído de PDFs econômicos.
-    Remove ruídos que podem confundir o LLM.
+    Higieniza o texto extraído de PDFs removendo cabeçalhos, rodapés e ruídos.
     """
+    if not texto:
+        return ""
 
-    @staticmethod
-    def limpar_texto_basico(texto: str) -> str:
-        if not texto:
-            return ""
+    # 1. Remover padrões comuns de cabeçalho/rodapé do BCB
+    padroes_para_remover = [
+        r"Relatório de Estabilidade Financeira",
+        r"Banco Central do Brasil",
+        r"Page \d+ of \d+",
+        r"^\d+\s*$"  # Números de página isolados em uma linha
+    ]
 
-        # 1. Unificar quebras de linha que separam frases indevidamente
-        # Ex: "Eco-\nnomia" vira "Economia"
-        texto = re.sub(r'(?<=[a-z])-\n(?=[a-z])', '', texto)
+    for padrao in padroes_para_remover:
+        texto = re.sub(padrao, '', texto, flags=re.IGNORECASE | re.MULTILINE)
 
-        # 2. Remover quebras de linha excessivas (transformar parágrafo em linha única)
-        texto = texto.replace('\n', ' ')
+    # 2. Unificar quebras de linha de hifenização (Ex: "Eco-\nnomia" -> "Economia")
+    texto = re.sub(r'(?<=[a-z])-\n(?=[a-z])', '', texto)
 
-        # 3. Remover múltiplos espaços em branco
-        texto = re.sub(r'\s+', ' ', texto)
+    # 3. Remover quebras de linha excessivas (transformar parágrafo em linha única)
+    texto = texto.replace('\n', ' ')
 
-        return texto.strip()
+    # 4. Remover múltiplos espaços em branco gerados pelas remoções acima
+    texto_limpo = re.sub(r'\s+', ' ', texto).strip()
 
-    @staticmethod
-    def remover_cabecalhos_rodape(texto: str) -> str:
-        """
-        Remove padrões comuns de relatórios do BCB.
-        Ex: 'Relatório de Estabilidade Financeira' repetido em todas as páginas.
-        """
-        padroes_para_remover = [
-            r"Relatório de Estabilidade Financeira",
-            r"Banco Central do Brasil",
-            r"^\d+\s*$",  # Números de página isolados
-            r"Page \d+ of \d+"
-        ]
-
-        for padrao in padroes_para_remover:
-            texto = re.sub(padrao, '', texto, flags=re.IGNORECASE)
-
-        return texto.strip()
-
-    @classmethod
-    def processar(cls, texto: str) -> str:
-        """Pipeline completo de limpeza."""
-        texto = cls.remover_cabecalhos_rodape(texto)
-        texto = cls.limpar_texto_basico(texto)
-        return texto
+    return texto_limpo

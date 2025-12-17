@@ -1,67 +1,70 @@
 import json
-import os
+from pathlib import Path
+from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
-from src.config import TABLES_DIR, SUMMARIES_DIR
 from src.models.llm_factory import LLMFactory
-from src.prompts.templates import PROMPT_RESUMO
+from src.config import PROCESSED_DIR
 
 
 def gerar_resumos_tabelas():
-    """
-    Lê os arquivos JSON de tabelas extraídas e gera resumos semânticos usando LLM.
-    Essencial para que o RAG consiga encontrar tabelas através de perguntas em linguagem natural.
-    """
-    # Garante que a pasta de saída existe
-    SUMMARIES_DIR.mkdir(parents=True, exist_ok=True)
+    """Gera resumos para todas as tabelas de todos os PDFs processados."""
 
-    arquivos_tabela = list(TABLES_DIR.glob("*.json"))
+    # Busca todas as pastas de PDF dentro de processed
+    pastas_pdfs = [f for f in PROCESSED_DIR.iterdir() if f.is_dir()]
 
-    if not arquivos_tabela:
-        print(f"⚠️ Nenhuma tabela encontrada em {TABLES_DIR}. Pule esta etapa se o PDF não tiver tabelas.")
-        return
-
-    print(f"--- Iniciando sumarização de {len(arquivos_tabela)} tabelas... ---")
-
-    # Inicializa o LLM (Vai usar Ollama ou OpenAI dependendo do seu config.py)
-    # Usamos temperature=0 para resumos factuais
+    # Configura o LLM
     llm = LLMFactory.create_chat_model(temperature=0)
+    prompt = ChatPromptTemplate.from_template(
+        """
+        Você é um analista econômico experiente.
+        Analise a seguinte tabela em HTML do Banco Central:
 
-    # Cria a cadeia: Prompt -> LLM -> Texto
-    chain = PROMPT_RESUMO | llm | StrOutputParser()
+        {tabela}
 
-    for arquivo in arquivos_tabela:
-        try:
-            # 1. Ler a tabela bruta
-            with open(arquivo, "r", encoding="utf-8") as f:
-                dados = json.load(f)
+        Tarefa: Gere um resumo narrativo destacando as principais tendências, 
+        picos, quedas e números críticos. Não apenas descreva as linhas, 
+        interprete o significado econômico.
+        """
+    )
+    chain = prompt | llm | StrOutputParser()
 
-            # Algumas tabelas podem vir com chaves diferentes dependendo se vieram do camelot ou unstructured
-            # Aqui normalizamos para pegar o conteúdo HTML ou Texto
-            conteudo = dados.get("conteudo_html") or dados.get("conteudo_csv") or dados.get("content") or str(dados)
-            tabela_id = dados.get("id_tabela") or dados.get("id") or arquivo.stem
+    for pasta in pastas_pdfs:
+        dir_tabelas = pasta / "tables"
+        dir_resumos = pasta / "summaries"
+        dir_resumos.mkdir(exist_ok=True)
 
-            arquivo_saida = SUMMARIES_DIR / f"summary_{tabela_id}.txt"
+        # Pega todos os JSONs de tabela
+        arquivos_tabela = list(dir_tabelas.glob("*.json"))
 
-            # Se o resumo já existe, pula (cache simples)
-            if arquivo_saida.exists():
-                print(f"   [Cache] Resumo já existe para: {tabela_id}")
-                continue
+        if not arquivos_tabela: continue
 
-            print(f"   ⏳ Gerando resumo para tabela: {tabela_id}...")
+        print(f"   ∑ Resumindo {len(arquivos_tabela)} tabelas de {pasta.name}...")
 
-            # 2. Invocar o LLM
-            # O prompt espera a variável 'conteudo_tabela' (definida no yaml)
-            resumo = chain.invoke({"conteudo_tabela": conteudo})
+        for arq in arquivos_tabela:
+            try:
+                # 1. Ler a tabela original
+                with open(arq, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
 
-            # 3. Salvar o resumo
-            with open(arquivo_saida, "w", encoding="utf-8") as f:
-                f.write(resumo)
+                html_tabela = data.get('content', '')
+                if not html_tabela: continue
 
-        except Exception as e:
-            print(f"   ❌ Erro ao resumir {arquivo.name}: {e}")
+                # 2. Gerar Resumo via LLM
+                resumo = chain.invoke({"tabela": html_tabela})
 
-    print("--- Sumarização Concluída ---")
+                # 3. Salvar o Resumo (mantendo metadados para rastreabilidade)
+                novo_json = {
+                    "content": resumo,  # O conteúdo agora é o texto explicativo
+                    "original_table_content": html_tabela,  # Guardamos o original se precisar
+                    "source": data.get('source'),
+                    "page_number": data.get('page_number'),
+                    "type": "table_summary"
+                }
 
+                # Salva com prefixo summary_
+                caminho_resumo = dir_resumos / f"summary_{arq.name}"
+                with open(caminho_resumo, 'w', encoding='utf-8') as f_out:
+                    json.dump(novo_json, f_out, ensure_ascii=False, indent=4)
 
-if __name__ == "__main__":
-    gerar_resumos_tabelas()
+            except Exception as e:
+                print(f"      Erro ao resumir {arq.name}: {e}")
